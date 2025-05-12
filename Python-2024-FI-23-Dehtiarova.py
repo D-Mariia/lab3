@@ -1,193 +1,140 @@
 import time
-import random
+from tabulate import tabulate
 
 class GF2_191:
-    IRREDUCIBLE_POLY = int("1" + "0" * 181 + "1" + "0" * 8 + "1", 2) # x^191 + x^9 + 1
-
-    def __init__(self, value):
-        self.value = value & ((1 << 191) - 1)
-
-    def __str__(self):
-        return hex(self.value)[2:].upper().zfill((191 + 3) // 4)
+    m = 191
+    irr_poly = [0] * 192
+    irr_poly[0] = 1
+    irr_poly[9] = 1
+    irr_poly[191] = 1
 
     @staticmethod
-    def zero():
-        return GF2_191(0)
+    def add(a, b):
+        size = max(len(a), len(b))
+        a = a + [0] * (size - len(a))
+        b = b + [0] * (size - len(b))
+
+        C = []
+        for i in range(size):
+            temp = a[i] + b[i]
+            C.append(temp % 2)
+        return C
 
     @staticmethod
-    def one():
-        return GF2_191(1)
-
-    def add(self, other):
-        return GF2_191(self.value ^ other.value)
-
-    def multiply(self, other):
-        result = 0
-        a = self.value
-        b = other.value
-
-        for i in range(191):
-            if b & 1:
-                result ^= a
-            b >>= 1
-            a <<= 1
-            if a & (1 << 191):
-                a ^= GF2_191.IRREDUCIBLE_POLY
-
-        return GF2_191(result)
-
-    def square(self):
-        result = 0
-        current = self.value
-
-        for i in range(191):
-            if (current & (1 << i)):
-                result ^= (1 << (2 * i))
-
-        for i in range(382, 190, -1):
-            if result & (1 << i):
-                result ^= GF2_191.IRREDUCIBLE_POLY << (i - 191)
-
-        return GF2_191(result)
-
-    def inverse(self):
-        if self.value == 0:
-            raise ValueError("Обернений елемент до 0 не існує.")
-
-        a, b = self.value, GF2_191.IRREDUCIBLE_POLY
-        u, v = 1, 0
-        while a != 1:
-            if a == 0:
-                raise ValueError("Обернений елемент не знайдено.")
-
-            shift = a.bit_length() - b.bit_length()
-            if shift < 0:
-                a, b = b, a
-                u, v = v, u
-                continue
-
-            a ^= b << shift
-            u ^= v << shift
-
-            a &= (1 << 191) - 1
-            u &= (1 << 191) - 1
-
-        return GF2_191(u)
-
-    def power(self, n):
-        result = GF2_191.one()
-        base = self
-
-        while n > 0:
-            if n & 1:
-                result = result.multiply(base)
-            base = base.square()
-            n >>= 1
-
-        return result
+    def mul(a, b):
+        C = [0] * (len(a) + len(b) - 1)
+        for i in range(len(a)):
+            for j in range(len(b)):
+                C[i + j] ^= a[i] * b[j]
+        return GF2_191.mod(C, GF2_191.irr_poly)
 
     @staticmethod
-    def from_input():
-        while True:
-            try:
-                hex_value = input("Введіть значення елемента в 16-вому форматі (до 191 біт): ").strip()
-                value = int(hex_value, 16)
-                if value >= (1 << 191):
-                    raise ValueError("Число перевищує 191 біт.")
-                return GF2_191(value)
-            except ValueError as e:
-                print(f"Помилка: {e}. Спробуйте ще раз.")
+    def cut(p):
+        while len(p) > 1 and p[-1] == 0:
+            p.pop()
+        return p or [0]
 
     @staticmethod
-    def random_element():
-        return GF2_191(random.randint(0, (1 << 191) - 1))
+    def cmp(a, b):
+        a = GF2_191.cut(a)
+        b = GF2_191.cut(b)
+        if len(a) > len(b): return 1
+        if len(a) < len(b): return -1
+        for i in range(len(a) - 1, -1, -1):
+            if a[i] > b[i]: return 1
+            if a[i] < b[i]: return -1
+        return 0
 
+    @staticmethod
+    def mod(a, p):
+        a = a[:]
+        p = GF2_191.cut(p)
 
-def validate_field_properties():
-    print("\n Перевірка тотожностей ")
-    a = GF2_191.random_element()
-    b = GF2_191.random_element()
-    c = GF2_191.random_element()
-    d = GF2_191.random_element()
+        while len(a) >= len(p):
+            shift = len(a) - len(p)
+            if a[-1] == 1:
+                for i in range(len(p)):
+                    a[shift + i] ^= p[i]
+            a = GF2_191.cut(a)
+        return a
 
-    left = a.add(b).multiply(c)
-    right = a.multiply(c).add(b.multiply(c))
-    assert left.value == right.value, "(a + b) * c != a * c + b * c"
-    print("Тотожність (a + b) * c = a * c + b * c виконується")
+    @staticmethod
+    def sq(a):
+        return GF2_191.mul(a, a)
 
-    if d.value != 0:
-        inv_d = d.inverse()
-        one = d.multiply(inv_d)
-        assert one.value == GF2_191.one().value, "d * d^(-1) != 1"
-        print("Тотожність d * d^(-1) = 1 виконується")
+    @staticmethod
+    def pow(a, n):
+        c = [1]
+        for i in range(len(n) - 1, -1, -1):
+            if n[i] == 1:
+                c = GF2_191.mul(c, a)
+            a = GF2_191.sq(a)
+        return c
 
-    print("Усі перевірки успішні")
+    @staticmethod
+    def inv(a):
+        c = [1]
+        m = bin((2 ** 191) - 2)
+        for i in range(len(m) - 1, -1, -1):
+            if m[i] == '1':
+                c = GF2_191.mul(c, a)
+            a = GF2_191.sq(a)
+        return c
 
+    @staticmethod
+    def tr(a):
+        t = a[:]
+        for _ in range(1, 191):
+            a = GF2_191.sq(a)
+            t = [ti ^ ai for ti, ai in zip(t, a)]
+        return sum(t) % 2
 
-def measure_execution_time():
-    print("\n Вимірювання часу ")
-    operations = {
-        "Додавання": lambda a, b: a.add(b),
-        "Множення": lambda a, b: a.multiply(b),
-        "Квадрат": lambda a, _: a.square(),
-        "Обернений елемент": lambda a, _: a.inverse() if a.value != 0 else None,
-        "Піднесення до степеня": lambda a, _: a.power(random.randint(0, (1 << 191) - 1))
-    }
-
-    timings = {}
-    iterations = 1000
-    for name, operation in operations.items():
-        total_time = 0
+    @staticmethod
+    def time(func, a, b, iterations=100):
+        start_time = time.time()
         for _ in range(iterations):
-            a = GF2_191.random_element()
-            b = GF2_191.random_element()
-            start = time.time()
-            operation(a, b)
-            end = time.time()
-            total_time += (end - start)
-        avg_time = total_time / iterations
-        timings[name] = avg_time
+            func(a, b)
+        end_time = time.time()
+        return (end_time - start_time) / iterations
 
-    print("Результати вимірювань (у секундах):")
-    for op, timing in timings.items():
-        print(f"{op}: {timing:.6f} сек.")
-
-    return timings
-
-
-def main():
-    a = GF2_191.from_input()
-    b = GF2_191.from_input()
-    n = int(input("Введіть степінь у 16-вій системі: ").strip(), 16)
-
-    print(f"A: {a}")
-    print(f"B: {b}")
-    print(f"N: {hex(n).upper()[2:]}")
-
-    zero = GF2_191.zero()
-    one = GF2_191.one()
-    print(f" (0): {zero}")
-    print(f" (1): {one}")
-
-    sum_ab = a.add(b)
-    print(f"A+B: {sum_ab}")
-
-    product_ab = a.multiply(b)
-    print(f"A*B: {product_ab}")
-
-    squared_a = a.square()
-    print(f"А^2: {squared_a}")
-
-    inv_a = a.inverse()
-    print(f"A^(-1): {inv_a}")
-
-    power_a = a.power(n)
-    print(f"A^N: {power_a}")
-
-    validate_field_properties()
-
-    measure_execution_time()
+"""
+Очікуванні результати
+a = '01010100011010101111101010011001000111111111000001110101010010010100001010000011010100111011111001110010101111011001010110110010000000101010000110110010111110111110101011010000111110011111110'
+b = '11001011110011011010011110011001010111110111100111110000101101110011001001011011111110101010001100010101111101001110000000110010110110001100010000111110001101110000111011110011110011111100010'
+n = '01110100101100000010101110111000100001110001010010100010111101000000100110101000010001101000110001001010001010010111100000110000101011101100101100101111000010011100100111100001111110111111000'
+a+b = '10011111101001110101110100000000010000001000100110000101111111100111000011011000101010010001110101100111010010010111010110000000110110100110010110001100110011001110010000100011001101100011100'
+a*b = '11110111111110100100110111000000101111000001111110000011111001111001001001111011100000011100111100011000101001110100001101001111101111111101111110111110110001011001001010101001110001010010001'
+a^2 = '00111011101110101011111001000110011111010100111001100001110000011010101111111101011101110010101010010101101100111011100011000011101100101010011001100010101001110011000100101111110011111011100'
+a^(-1)= '00001110101010000100111101011101001001110000001101100010000000110000111110011000010110111100110001001000101100111000000111100010111100111000110101000111000101101011101110111100110111111111101'
+a^n= '11100110100111011100000100100011110100110100011110000101011010011110010011111100110101010110011110100001010001101001101100010111000111010010011111110000001010001001011110010001101100100100111'
+"""
+a = [int(c) for c in '01010100011010101111101010011001000111111111000001110101010010010100001010000011010100111011111001110010101111011001010110110010000000101010000110110010111110111110101011010000111110011111110'][::-1]
+b = [int(c) for c in '11001011110011011010011110011001010111110111100111110000101101110011001001011011111110101010001100010101111101001110000000110010110110001100010000111110001101110000111011110011110011111100010'][::-1]
+n = [int(c) for c in '01110100101100000010101110111000100001110001010010100010111101000000100110101000010001101000110001001010001010010111100000110000101011101100101100101111000010011100100111100001111110111111000']
 
 
-if __name__ == "__main__":
-    main()
+print("A+B:", ''.join(map(str, GF2_191.add(a, b)[::-1])))
+print("A*B:", ''.join(map(str, GF2_191.mul(a, b)[::-1])))
+print("A^2:", ''.join(map(str, GF2_191.sq(a)[::-1])))
+print("A^(-1):", ''.join(map(str, GF2_191.inv(a)[::-1])))
+print("A^N:", ''.join(map(str, GF2_191.pow(a,n)[::-1])))
+print("trace:", GF2_191.tr(a))
+
+
+add_time = GF2_191.time(GF2_191.add, a, b)
+mul_time = GF2_191.time(GF2_191.mul, a, b)
+sq_time = GF2_191.time(GF2_191.mul, a, a)
+in_time = GF2_191.time(GF2_191.mul, a, a)
+pow_time = GF2_191.time(GF2_191.mul, a, a)
+tr_time = GF2_191.time(GF2_191.mul, a, a)
+
+table = [
+    ["Додавання", f"{add_time:.8f} сек"],
+    ["Множення", f"{mul_time:.8f} сек"],
+    ["Квадрат", f"{sq_time:.8f} сек"],
+    ["Обернений", f"{in_time:.8f} сек"],
+    ["Степінь", f"{pow_time:.8f} сек"],
+    ["Слід", f"{tr_time:.8f} сек"],
+]
+
+print(tabulate(table, headers=["Операція ", "Середній час"], tablefmt="simple"))
